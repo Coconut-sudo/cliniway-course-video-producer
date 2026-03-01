@@ -34,10 +34,17 @@ function clampTime(t, max) {
   return Math.max(0, Math.min(max, t));
 }
 
+// IMPORTANT: treat ALL interactive controls as "typing targets" so Enter/Space won't do global actions
 function isTypingTarget(el) {
   if (!el) return false;
   const tag = el.tagName?.toLowerCase();
-  return tag === "input" || tag === "textarea" || el.isContentEditable;
+  return (
+    tag === "input" ||
+    tag === "textarea" ||
+    tag === "select" ||
+    tag === "button" ||
+    el.isContentEditable
+  );
 }
 
 /** ---------------------------
@@ -49,6 +56,9 @@ function mountUI() {
       <h1>Cliniway course video producer</h1>
       <p class="muted">Upload audio + PDF. Space play/pause · Enter mark next slide (works even when paused). Optional pointer burn-in. Export MP4.</p>
     </header>
+
+    <!-- hidden audio element (required) -->
+    <audio id="audioEl" preload="metadata" style="display:none;"></audio>
 
     <div class="wrap">
       <div class="card">
@@ -126,6 +136,8 @@ function mountUI() {
 
 mountUI();
 
+const audioEl = $("audioEl");
+
 /** ---------------------------
  *  Global error surfacing
  *  --------------------------*/
@@ -145,8 +157,6 @@ function showError(err) {
 /** ---------------------------
  *  App state
  *  --------------------------*/
-const audioEl = $("audioEl");
-
 let audioFile = null;
 let wavesurfer = null;
 
@@ -154,13 +164,13 @@ let pdfDoc = null;
 let pageCount = 0;
 let currentSlide = 1;
 
-// Each mark means: at time t, switch to slide (slide)
+// Each mark: at time t, switch to slide = slide
 const marks = []; // { slide: number, t: number }
 
 // Pointer burn-in
 let pointerEnabled = false;
-let pointerPos = null; // normalized within slide bitmap (0..1)
-const pointerEvents = []; // sorted by time when recorded: {t, x, y, kind}
+let pointerPos = null; // normalized within overlay canvas (0..1)
+const pointerEvents = []; // {t, x, y, kind}
 
 /** ---------------------------
  *  Controls helpers
@@ -181,8 +191,7 @@ function refreshControls() {
 
 function renderMarksTable() {
   if (!marks.length) {
-    $("marksTable").innerHTML =
-      `<span class="muted">No marks yet. Press Enter to mark switch to next slide.</span>`;
+    $("marksTable").innerHTML = `<span class="muted">No marks yet. Press Enter to mark switch to next slide.</span>`;
     return;
   }
   const rows = marks
@@ -206,7 +215,6 @@ function resizeOverlayToMatch() {
   ov.width = pdf.width;
   ov.height = pdf.height;
 
-  // Ensure overlay CSS box matches PDF canvas box
   ov.style.width = `${pdf.width}px`;
   ov.style.height = `${pdf.height}px`;
 }
@@ -214,8 +222,6 @@ function resizeOverlayToMatch() {
 function getPointerAtTime(t) {
   if (!pointerEvents.length) return pointerPos;
 
-  // pointerEvents are appended in time order (we enforce monotonic on record).
-  // Find latest event with e.t <= t (linear scan from end is OK; events are sparse)
   for (let i = pointerEvents.length - 1; i >= 0; i--) {
     if (pointerEvents[i].t <= t) return { x: pointerEvents[i].x, y: pointerEvents[i].y };
   }
@@ -236,21 +242,17 @@ function drawOverlayAtTime(t) {
   const cy = p.y * ov.height;
 
   ctx.save();
-  ctx.globalAlpha = 1;
 
-  // glow
   ctx.beginPath();
   ctx.arc(cx, cy, 18, 0, Math.PI * 2);
   ctx.fillStyle = "rgba(168,212,240,0.55)";
   ctx.fill();
 
-  // core dot
   ctx.beginPath();
   ctx.arc(cx, cy, 6, 0, Math.PI * 2);
   ctx.fillStyle = "rgba(47,128,237,0.92)";
   ctx.fill();
 
-  // ring
   ctx.beginPath();
   ctx.arc(cx, cy, 14, 0, Math.PI * 2);
   ctx.lineWidth = 2;
@@ -309,7 +311,6 @@ function recordPointer(kind, x, y) {
 
   const t = clampTime(audioEl.currentTime || 0, audioEl.duration || 0);
 
-  // Keep pointer events monotonic in time
   const last = pointerEvents[pointerEvents.length - 1];
   if (last && t < last.t) return;
 
@@ -337,7 +338,6 @@ function doMark() {
   const nextSlide = currentSlide + 1;
   const t = clampTime(audioEl.currentTime || 0, audioEl.duration || 0);
 
-  // Monotonic timestamps
   const last = marks[marks.length - 1];
   if (last && t < last.t) {
     showError(new Error("Timestamp must be >= previous mark time."));
@@ -365,6 +365,8 @@ function doUndo() {
 $("audioInput").addEventListener("change", async (e) => {
   try {
     const f = e.target.files?.[0];
+
+    // BUGFIX #3: cancel -> keep current file/state
     if (!f) return;
 
     audioFile = f;
@@ -390,6 +392,11 @@ $("audioInput").addEventListener("change", async (e) => {
       refreshControls();
     };
 
+    // BUGFIX #2: prevent Enter reopening file dialog (remove focus)
+    $("audioInput").blur();
+    // Optional: allow selecting same file again later
+    e.target.value = "";
+
     refreshControls();
   } catch (err) {
     showError(err);
@@ -399,13 +406,14 @@ $("audioInput").addEventListener("change", async (e) => {
 $("pdfInput").addEventListener("change", async (e) => {
   try {
     const f = e.target.files?.[0];
+
+    // BUGFIX #3: cancel -> keep current file/state
     if (!f) return;
 
     $("pdfName").textContent = f.name;
 
     const buf = await f.arrayBuffer();
 
-    // Worker mode first; fallback disableWorker.
     try {
       pdfDoc = await pdfjsLib.getDocument({ data: buf }).promise;
     } catch {
@@ -424,6 +432,10 @@ $("pdfInput").addEventListener("change", async (e) => {
 
     await renderSlide(1);
     refreshControls();
+
+    // BUGFIX #2: prevent Enter reopening file dialog (remove focus)
+    $("pdfInput").blur();
+    e.target.value = "";
   } catch (err) {
     showError(err);
   }
@@ -477,6 +489,16 @@ overlay.addEventListener("mouseup", (e) => {
   drawOverlayAtTime(audioEl.currentTime || 0);
 });
 
+// BUGFIX #2: prevent Enter/Space on file inputs from bubbling to global handler / reopening picker
+for (const id of ["audioInput", "pdfInput"]) {
+  $(id).addEventListener("keydown", (e) => {
+    if (e.code === "Enter" || e.code === "Space") {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
+}
+
 // Keyboard
 window.addEventListener("keydown", (e) => {
   if (isTypingTarget(document.activeElement)) return;
@@ -508,14 +530,14 @@ window.addEventListener("keydown", (e) => {
 })();
 
 /** ---------------------------
- *  FFmpeg loading (local core)
+ *  FFmpeg loading (local core) — BUGFIX #1 for GitHub Pages
+ *  Use BASE_URL so it works under /<repo>/ on Pages.
  *  --------------------------*/
 async function loadFFmpeg(ffmpeg) {
-  // These MUST exist:
-  // public/vendor/ffmpeg/ffmpeg-core.js
-  // public/vendor/ffmpeg/ffmpeg-core.wasm
-  const coreURL = await toBlobURL("/vendor/ffmpeg/ffmpeg-core.js", "text/javascript");
-  const wasmURL = await toBlobURL("/vendor/ffmpeg/ffmpeg-core.wasm", "application/wasm");
+  // Vite sets BASE_URL to "/" in dev and "/<repo>/" on GitHub Pages.
+  const base = import.meta.env.BASE_URL; // ends with "/"
+  const coreURL = await toBlobURL(`${base}vendor/ffmpeg/ffmpeg-core.js`, "text/javascript");
+  const wasmURL = await toBlobURL(`${base}vendor/ffmpeg/ffmpeg-core.wasm`, "application/wasm");
   await ffmpeg.load({ coreURL, wasmURL });
 }
 
@@ -525,28 +547,21 @@ async function blobToU8(blob) {
 
 function getAudioInputName(file) {
   const name = file?.name || "audio";
-  // Keep extension if present, FFmpeg auto-detects.
   const dot = name.lastIndexOf(".");
   if (dot > 0 && dot < name.length - 1) return `audio_input${name.slice(dot)}`;
   return "audio_input";
 }
 
 /** ---------------------------
- *  Export scheduling
- *  - Efficient for long audio: render each slide once, make static segments, concat, mux audio
- *  - Pointer burn-in (if enabled) is NOT supported in fast mode for 60 minutes.
- *    We will block and instruct: disable pointer for fast export.
+ *  Export scheduling (fast, segmented)
  *  --------------------------*/
 function buildSchedule() {
   const dur = audioEl.duration || 0;
 
-  // start times: slide 1 at 0; slide k at mark time
   const start = new Map();
   start.set(1, 0);
   for (const m of marks) start.set(m.slide, m.t);
 
-  // For long lectures, user might not mark all slides.
-  // We only schedule slides that have a defined start time; each runs until next scheduled start, or end.
   const arr = [];
   for (let s = 1; s <= pageCount; s++) {
     if (start.has(s)) arr.push({ slide: s, t0: start.get(s) });
@@ -566,7 +581,6 @@ function buildSchedule() {
 async function renderSlidePngBytes(slideNum, targetW, targetH) {
   const page = await pdfDoc.getPage(slideNum);
 
-  // Render at a scale that fits within target, then we will pad/scale in FFmpeg for exact output.
   const vp1 = page.getViewport({ scale: 1 });
   const scale = Math.min(targetW / vp1.width, targetH / vp1.height);
   const vp = page.getViewport({ scale });
@@ -603,31 +617,30 @@ $("exportBtn").addEventListener("click", async () => {
     if (!canInteract()) throw new Error("Load audio and PDF first.");
 
     if (pointerEnabled) {
-      // For 60 min typical duration, pointer burn-in requires frame-based render (very heavy).
-      // Production stance: keep fast export path stable; ask user to disable pointer for now.
-      throw new Error("Pointer burn-in export is disabled for long videos in fast mode. Turn off Pointer burn-in to export. (We can add a separate 'real-time record' export mode next.)");
+      throw new Error(
+        "Pointer burn-in export is disabled for long videos in fast mode. Turn off Pointer burn-in to export. (We can add a separate 'real-time record' export mode next.)"
+      );
     }
 
     const segs = buildSchedule();
     if (!segs.length) {
-      throw new Error("No scheduled segments. Press Enter at least once to schedule slide 2, or keep slide 1 only by adding a mark at 0s (optional).");
+      throw new Error(
+        "No scheduled segments. Press Enter at least once to schedule slide 2."
+      );
     }
 
     const [W, H] = $("resSel").value.split("x").map(Number);
     const fps = 30;
-    const dur = audioEl.duration;
 
     setExportStatus(`Loading FFmpeg...`);
     const ffmpeg = new FFmpeg();
     await loadFFmpeg(ffmpeg);
 
-    // Write audio
     setExportStatus(`Preparing audio...`);
     const audioName = getAudioInputName(audioFile);
     const audioBytes = new Uint8Array(await audioFile.arrayBuffer());
     await ffmpeg.writeFile(audioName, audioBytes);
 
-    // Render needed slide PNGs once
     const neededSlides = [...new Set(segs.map((s) => s.slide))];
     setExportStatus(`Rasterizing ${neededSlides.length} slide(s) to PNG...`);
     for (let i = 0; i < neededSlides.length; i++) {
@@ -637,7 +650,6 @@ $("exportBtn").addEventListener("click", async () => {
       if (i % 2 === 0) setExportStatus(`Rasterizing slides... (${i + 1}/${neededSlides.length})`);
     }
 
-    // Build each segment as a short mp4 from a single image
     setExportStatus(`Encoding segments... (0/${segs.length})`);
     for (let i = 0; i < segs.length; i++) {
       const seg = segs[i];
@@ -645,7 +657,6 @@ $("exportBtn").addEventListener("click", async () => {
       const outSeg = safeSegName(i);
       const t = seg.len.toFixed(3);
 
-      // scale+pad to exact resolution
       const vf = `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black`;
 
       await ffmpeg.exec([
@@ -674,12 +685,8 @@ $("exportBtn").addEventListener("click", async () => {
       if (i % 5 === 0) setExportStatus(`Encoding segments... (${i + 1}/${segs.length})`);
     }
 
-    // Concat segments (stream copy)
     setExportStatus(`Concatenating segments...`);
-    const concatTxt =
-      segs
-        .map((_, i) => `file ${safeSegName(i)}`)
-        .join("\n") + "\n";
+    const concatTxt = segs.map((_, i) => `file ${safeSegName(i)}`).join("\n") + "\n";
     await ffmpeg.writeFile("concat.txt", new TextEncoder().encode(concatTxt));
 
     await ffmpeg.exec([
@@ -695,7 +702,6 @@ $("exportBtn").addEventListener("click", async () => {
       "video.mp4",
     ]);
 
-    // Mux audio
     setExportStatus(`Muxing audio...`);
     await ffmpeg.exec([
       "-y",
@@ -713,7 +719,6 @@ $("exportBtn").addEventListener("click", async () => {
       "out.mp4",
     ]);
 
-    // Output
     setExportStatus(`<span class="ok">Finalizing...</span>`);
     const out = await ffmpeg.readFile("out.mp4");
     const outBlob = new Blob([out.buffer], { type: "video/mp4" });
