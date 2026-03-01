@@ -36,7 +36,6 @@ function clampTime(t, max) {
   return Math.max(0, Math.min(max, t));
 }
 
-// IMPORTANT: treat ALL interactive controls as "typing targets" so Enter/Space won't do global actions
 function isTypingTarget(el) {
   if (!el) return false;
   const tag = el.tagName?.toLowerCase();
@@ -49,34 +48,36 @@ function isTypingTarget(el) {
   );
 }
 
-/** ---------------------------
- *  UI
- *  --------------------------*/
+/* ---------------------------
+ * UI
+ * --------------------------*/
 function mountUI() {
   $("app").innerHTML = `
-    <header>
-      <h1>Cliniway course video producer</h1>
-      <p class="muted">
-        Upload audio + PDF. Space play/pause · Enter marks next slide. Drag markers on waveform to tweak timestamps.
-        Pointer burn-in supported in export.
-      </p>
+    <header class="top">
+      <div>
+        <h1>Cliniway course video producer</h1>
+        <p class="muted">
+          Upload audio + PDF. Space play/pause · Enter marks next slide. Drag markers on waveform to tweak.
+          Zoom waveform for precision. Pointer burn-in supported in export.
+        </p>
+      </div>
     </header>
 
     <audio id="audioEl" preload="metadata" style="display:none;"></audio>
 
     <div class="wrap">
       <div class="card">
-        <div class="muted" style="font-weight:800; font-size:12px;">UPLOAD</div>
+        <div class="section-title">UPLOAD</div>
 
-        <label class="muted" style="display:block;margin-top:10px;">Audio voiceover</label>
+        <label class="muted label">Audio voiceover</label>
         <input id="audioInput" type="file" accept="audio/*" />
 
-        <label class="muted" style="display:block;margin-top:10px;">Slides PDF</label>
+        <label class="muted label">Slides PDF</label>
         <input id="pdfInput" type="file" accept="application/pdf" />
 
-        <div style="margin-top:14px;">
+        <div class="row" style="margin-top:14px;">
           <button id="playBtn" class="btn primary" disabled>Play / Pause (Space)</button>
-          <select id="speedSel" disabled style="margin-top:10px;">
+          <select id="speedSel" class="select" disabled>
             <option value="1">1.0×</option>
             <option value="1.2">1.2×</option>
             <option value="1.5">1.5×</option>
@@ -86,47 +87,63 @@ function mountUI() {
           </select>
         </div>
 
-        <div style="margin-top:12px; display:flex; gap:10px; align-items:center;">
-          <label class="muted" style="display:flex; gap:8px; align-items:center; cursor:pointer;">
+        <div class="row" style="margin-top:10px;">
+          <label class="toggle">
             <input id="pointerToggle" type="checkbox" />
-            Pointer burn-in
+            <span>Pointer burn-in</span>
           </label>
           <span class="muted" id="pointerStatus">OFF</span>
         </div>
 
-        <div id="waveform" style="height:120px;margin-top:12px;border-radius:16px;border:1px solid var(--border);background:rgba(255,255,255,0.7);"></div>
+        <div id="waveform" class="wave"></div>
 
-        <div style="margin-top:10px;">
-          <span class="mono">Time: <span id="tNow">00:00.000</span></span>
-          <span class="mono" style="float:right;">Dur: <span id="tDur">--:--.---</span></span>
+        <div class="row" style="margin-top:10px;">
+          <div class="mono">Time: <span id="tNow">00:00.000</span></div>
+          <div class="mono">Dur: <span id="tDur">--:--.---</span></div>
         </div>
 
-        <div style="margin-top:14px; display:flex; gap:10px;">
+        <div style="margin-top:10px;">
+          <div class="row" style="align-items:center;">
+            <div class="muted label" style="margin:0;">Zoom</div>
+            <div class="mono"><span id="zoomLabel">80</span> px/s</div>
+          </div>
+          <input id="zoomRange" type="range" min="20" max="500" value="80" />
+        </div>
+
+        <div class="row" style="margin-top:14px;">
           <button id="markBtn" class="btn" disabled>Mark next slide (Enter)</button>
           <button id="undoBtn" class="btn" disabled>Undo last</button>
         </div>
 
-        <div class="muted" style="margin-top:12px; font-weight:800; font-size:12px;">TIMESTAMPS</div>
-        <div id="marksTable" class="mono" style="margin-top:8px; font-size:12px; line-height:1.55;"></div>
+        <div class="section-title" style="margin-top:14px;">TIMESTAMPS</div>
+        <div id="marksTable" class="mono marks"></div>
 
-        <div class="muted" style="margin-top:14px; font-weight:800; font-size:12px;">EXPORT</div>
-        <select id="resSel" style="margin-top:8px;">
+        <div class="section-title" style="margin-top:14px;">EXPORT</div>
+        <select id="resSel" class="select">
           <option value="2560x1440" selected>1440p (recommended)</option>
           <option value="3840x2160">4K (slow)</option>
         </select>
-        <button id="exportBtn" class="btn primary" style="margin-top:10px;" disabled>Export MP4</button>
+
+        <div class="row" style="margin-top:10px;">
+          <button id="exportBtn" class="btn primary" disabled>Export MP4</button>
+          <select id="ptrFpsSel" class="select" title="Pointer overlay FPS">
+            <option value="10" selected>Pointer 10 fps</option>
+            <option value="15">Pointer 15 fps</option>
+            <option value="20">Pointer 20 fps</option>
+          </select>
+        </div>
         <div id="exportStatus" class="muted" style="margin-top:8px; font-size:12px;"></div>
 
         <div id="runtimeError" style="margin-top:12px;"></div>
       </div>
 
       <div class="card">
-        <div class="muted" style="display:flex;justify-content:space-between;">
+        <div class="row muted" style="justify-content:space-between;">
           <div>PDF: <b id="pdfName">Not loaded</b></div>
           <div>Slide: <b id="slideInfo">- / -</b></div>
         </div>
 
-        <div id="viewerWrap" style="margin-top:12px;">
+        <div id="viewerWrap" class="viewer" style="margin-top:12px;">
           <canvas id="pdfCanvas"></canvas>
           <canvas id="overlayCanvas"></canvas>
         </div>
@@ -139,45 +156,42 @@ mountUI();
 
 const audioEl = $("audioEl");
 
-/** ---------------------------
- *  Global error surfacing
- *  --------------------------*/
+/* ---------------------------
+ * Errors
+ * --------------------------*/
 function showRuntimeError(err) {
   console.error(err);
   const msg = err && (err.message || String(err)) ? (err.message || String(err)) : "Unknown error";
   $("runtimeError").innerHTML = `<span class="danger">Runtime error:</span> <span class="muted">${escapeHtml(msg)}</span>`;
 }
-
 window.addEventListener("error", (e) => showRuntimeError(e.error || new Error(e.message)));
 window.addEventListener("unhandledrejection", (e) => showRuntimeError(e.reason));
+function showError(err) { showRuntimeError(err); }
 
-function showError(err) {
-  showRuntimeError(err);
-}
-
-/** ---------------------------
- *  App state
- *  --------------------------*/
+/* ---------------------------
+ * State
+ * --------------------------*/
 let audioFile = null;
+
 let wavesurfer = null;
 let regions = null;
+const regionBySlide = new Map(); // slide -> region marker
 
 let pdfDoc = null;
 let pageCount = 0;
 let currentSlide = 1;
 
-// Marks represent: slide N starts at time t (slide 1 always starts at 0)
-const marks = []; // { slide: number, t: number } for slide>=2
-const regionBySlide = new Map(); // slide -> region object
+// marks store slide start times for slide>=2: { slide, t }
+const marks = []; // sorted by slide
 
-// Pointer burn-in
+// pointer
 let pointerEnabled = false;
-let pointerPos = null; // normalized within overlay canvas (0..1)
-const pointerEvents = []; // {t, x, y, kind}
+let pointerPos = null; // normalized within page (0..1)
+const pointerEvents = []; // {t,x,y,kind}
 
-/** ---------------------------
- *  Controls helpers
- *  --------------------------*/
+/* ---------------------------
+ * Helpers / UI
+ * --------------------------*/
 function canInteract() {
   return !!(pdfDoc && audioFile && isFinite(audioEl.duration) && audioEl.duration > 0);
 }
@@ -193,7 +207,8 @@ function refreshControls() {
 
 function renderMarksTable() {
   if (!marks.length) {
-    $("marksTable").innerHTML = `<span class="muted">No marks yet. Press Enter to create marker for Slide 2, then drag on waveform to tweak.</span>`;
+    $("marksTable").innerHTML =
+      `<span class="muted">No marks yet. Press Enter to create Slide 2 marker, then drag markers on waveform to tweak.</span>`;
     return;
   }
   const rows = marks
@@ -204,19 +219,14 @@ function renderMarksTable() {
   $("marksTable").innerHTML = rows;
 }
 
-renderMarksTable();
-refreshControls();
-
-/** ---------------------------
- *  PDF render + overlay
- *  --------------------------*/
+/* ---------------------------
+ * PDF Render + preview overlay
+ * --------------------------*/
 function resizeOverlayToMatch() {
   const pdf = $("pdfCanvas");
   const ov = $("overlayCanvas");
-
   ov.width = pdf.width;
   ov.height = pdf.height;
-
   ov.style.width = `${pdf.width}px`;
   ov.style.height = `${pdf.height}px`;
 }
@@ -235,7 +245,6 @@ function drawOverlayAtTime(t) {
   ctx.clearRect(0, 0, ov.width, ov.height);
 
   if (!pointerEnabled) return;
-
   const p = getPointerAtTime(t);
   if (!p) return;
 
@@ -243,7 +252,6 @@ function drawOverlayAtTime(t) {
   const cy = p.y * ov.height;
 
   ctx.save();
-
   ctx.beginPath();
   ctx.arc(cx, cy, 18, 0, Math.PI * 2);
   ctx.fillStyle = "rgba(168,212,240,0.55)";
@@ -259,7 +267,6 @@ function drawOverlayAtTime(t) {
   ctx.lineWidth = 2;
   ctx.strokeStyle = "rgba(47,128,237,0.75)";
   ctx.stroke();
-
   ctx.restore();
 }
 
@@ -294,14 +301,19 @@ async function renderSlide(n) {
   refreshControls();
 }
 
-/** ---------------------------
- *  Pointer recording
- *  --------------------------*/
+/* ---------------------------
+ * Pointer capture
+ * --------------------------*/
 function setPointerEnabled(on) {
   pointerEnabled = !!on;
   $("pointerStatus").textContent = on ? "ON" : "OFF";
   if (!on) pointerPos = null;
   drawOverlayAtTime(audioEl.currentTime || 0);
+}
+function togglePointer() {
+  const next = !pointerEnabled;
+  $("pointerToggle").checked = next;
+  setPointerEnabled(next);
 }
 
 function recordPointer(kind, x, y) {
@@ -309,10 +321,8 @@ function recordPointer(kind, x, y) {
   if (!canInteract()) return;
 
   const t = clampTime(audioEl.currentTime || 0, audioEl.duration || 0);
-
   const last = pointerEvents[pointerEvents.length - 1];
   if (last && t < last.t) return;
-
   pointerEvents.push({ t, x, y, kind });
 }
 
@@ -327,137 +337,118 @@ function toNormalized(clientX, clientY) {
   return { x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) };
 }
 
-/** ---------------------------
- *  Waveform markers (regions)
- *  --------------------------*/
+/* ---------------------------
+ * Waveform markers (Regions) with anti-overlap clamping
+ * --------------------------*/
 function clearAllRegions() {
   regionBySlide.clear();
   if (regions && regions.clear) regions.clear();
 }
 
-function markBoundsForSlide(slide) {
-  // slide>=2 has a mark; clamp between previous and next mark (monotonic)
+function clampMarker(slide, t) {
   const dur = audioEl.duration || 0;
 
   const prevT = slide === 2 ? 0 : (marks.find(m => m.slide === slide - 1)?.t ?? 0);
   const nextT = marks.find(m => m.slide === slide + 1)?.t ?? dur;
 
-  // keep at least 50ms gap
   const lo = clampTime(prevT + 0.05, dur);
   const hi = clampTime(nextT - 0.05, dur);
-  return { lo, hi };
+
+  return Math.max(lo, Math.min(hi, t));
 }
 
-function upsertRegionForMark(slide, t) {
+function addOrUpdateMarker(slide, t) {
   if (!regions) return;
 
-  const color = "rgba(47,128,237,0.12)";
-  const label = `Slide ${slide}`;
-
-  // WaveSurfer regions are ranges; we create a very short region as a draggable "marker"
-  const start = t;
-  const end = Math.min(t + 0.001, (audioEl.duration || t + 0.001));
-
-  // Remove existing
   const old = regionBySlide.get(slide);
-  if (old && old.remove) old.remove();
+  if (old?.remove) old.remove();
+
+  const dur = audioEl.duration || 0;
+  const start = clampTime(t, dur);
+  const end = Math.min(start + 0.001, dur);
 
   const r = regions.addRegion({
     start,
     end,
     drag: true,
     resize: false,
-    color,
-    content: label,
+    color: "rgba(47,128,237,0.14)",
+    content: `Slide ${slide}`,
   });
 
-  // When dragged, update mark time (clamped)
   r.on("update-end", () => {
-    const newT = r.start;
-    const { lo, hi } = markBoundsForSlide(slide);
-    const clamped = Math.max(lo, Math.min(hi, newT));
-
-    // If clamp changed it, snap region to clamped
-    if (Math.abs(clamped - newT) > 1e-3) {
-      r.setOptions({ start: clamped, end: Math.min(clamped + 0.001, audioEl.duration || clamped + 0.001) });
-    }
+    const clamped = clampMarker(slide, r.start);
+    r.setOptions({ start: clamped, end: Math.min(clamped + 0.001, dur) });
 
     const idx = marks.findIndex(m => m.slide === slide);
     if (idx >= 0) marks[idx].t = clamped;
+
     renderMarksTable();
   });
 
-  // Clicking marker seeks to it
+  // Click marker -> seek
   r.element?.addEventListener?.("click", (ev) => {
     ev.preventDefault();
     ev.stopPropagation();
     audioEl.currentTime = r.start;
     wavesurfer?.setTime?.(r.start);
-    // also show correct slide at that time
-    const s = slideAtTime(buildSchedule(), r.start);
-    renderSlide(s).catch(showError);
   });
 
   regionBySlide.set(slide, r);
 }
 
-function rebuildAllRegions() {
-  if (!regions || !audioFile) return;
+function rebuildAllMarkers() {
+  if (!regions) return;
   clearAllRegions();
-  marks.slice().sort((a,b)=>a.slide-b.slide).forEach(m => upsertRegionForMark(m.slide, m.t));
+  marks.slice().sort((a,b)=>a.slide-b.slide).forEach(m => addOrUpdateMarker(m.slide, m.t));
 }
 
-/** ---------------------------
- *  Mark / undo
- *  --------------------------*/
+/* ---------------------------
+ * Mark / Undo
+ * --------------------------*/
 function doMark() {
   if (!canInteract()) return;
   if (currentSlide >= pageCount) return;
 
   const nextSlide = currentSlide + 1;
   const dur = audioEl.duration || 0;
-  const tRaw = clampTime(audioEl.currentTime || 0, dur);
 
-  // if already exists, we don't create duplicate; just focus it
+  // Prevent duplicate mark for same slide
   if (marks.some(m => m.slide === nextSlide)) {
-    const existing = marks.find(m => m.slide === nextSlide);
-    upsertRegionForMark(nextSlide, existing.t);
-    renderSlide(nextSlide).catch(showError);
+    renderSlide(nextSlide).catch(() => {});
     return;
   }
 
-  // ensure monotonic with previous mark
-  const prev = nextSlide === 2 ? 0 : (marks.find(m => m.slide === nextSlide - 1)?.t ?? 0);
-  const t = Math.max(prev + 0.05, tRaw);
+  // Enforce monotonic with previous
+  const prevT = nextSlide === 2 ? 0 : (marks.find(m => m.slide === nextSlide - 1)?.t ?? 0);
+  const tRaw = clampTime(audioEl.currentTime || 0, dur);
+  const t = Math.max(prevT + 0.05, tRaw);
 
   marks.push({ slide: nextSlide, t });
   marks.sort((a,b)=>a.slide-b.slide);
 
-  upsertRegionForMark(nextSlide, t);
+  addOrUpdateMarker(nextSlide, t);
   renderMarksTable();
-
-  renderSlide(nextSlide).catch(showError);
+  renderSlide(nextSlide).catch(() => {});
 }
 
 function doUndo() {
   if (!marks.length) return;
 
-  // remove last slide mark (highest slide)
   marks.sort((a,b)=>a.slide-b.slide);
   const removed = marks.pop();
 
   const r = regionBySlide.get(removed.slide);
-  if (r && r.remove) r.remove();
+  if (r?.remove) r.remove();
   regionBySlide.delete(removed.slide);
 
   renderMarksTable();
-  const backTo = Math.max(1, removed.slide - 1);
-  renderSlide(backTo).catch(showError);
+  renderSlide(Math.max(1, removed.slide - 1)).catch(() => {});
 }
 
-/** ---------------------------
- *  Audio + waveform
- *  --------------------------*/
+/* ---------------------------
+ * WaveSurfer init + Zoom
+ * --------------------------*/
 function initWaveSurfer(url) {
   if (wavesurfer) wavesurfer.destroy();
 
@@ -469,30 +460,34 @@ function initWaveSurfer(url) {
     normalize: true,
     media: audioEl,
     waveColor: "rgba(47,128,237,0.30)",
-    progressColor: "rgba(47,128,237,0.80)",
+    progressColor: "rgba(47,128,237,0.85)",
     cursorColor: "rgba(17,24,39,0.55)",
     plugins: [regions],
   });
 
   wavesurfer.load(url);
 
-  // Click waveform to seek; also update slide display at that time
-  wavesurfer.on("interaction", () => {
-    const t = wavesurfer.getTime();
-    const s = slideAtTime(buildSchedule(), t);
-    renderSlide(s).catch(showError);
-  });
-
-  // After ready, rebuild regions (if any marks)
   wavesurfer.on("ready", () => {
-    rebuildAllRegions();
+    const z = Number($("zoomRange").value);
+    wavesurfer.zoom(z);
+    $("zoomLabel").textContent = String(z);
+    rebuildAllMarkers();
   });
 }
 
+$("zoomRange").addEventListener("input", (e) => {
+  const z = Number(e.target.value);
+  $("zoomLabel").textContent = String(z);
+  wavesurfer?.zoom?.(z);
+});
+
+/* ---------------------------
+ * Upload handlers
+ * --------------------------*/
 $("audioInput").addEventListener("change", async (e) => {
   try {
     const f = e.target.files?.[0];
-    if (!f) return; // cancel -> keep current
+    if (!f) return; // cancel -> keep current file
 
     audioFile = f;
     const url = URL.createObjectURL(f);
@@ -504,7 +499,7 @@ $("audioInput").addEventListener("change", async (e) => {
     audioEl.onloadedmetadata = () => {
       $("tDur").textContent = fmtTime(audioEl.duration);
       refreshControls();
-      rebuildAllRegions();
+      rebuildAllMarkers();
     };
 
     $("audioInput").blur();
@@ -518,7 +513,7 @@ $("audioInput").addEventListener("change", async (e) => {
 $("pdfInput").addEventListener("change", async (e) => {
   try {
     const f = e.target.files?.[0];
-    if (!f) return; // cancel -> keep current
+    if (!f) return; // cancel -> keep current file
 
     $("pdfName").textContent = f.name;
     const buf = await f.arrayBuffer();
@@ -531,30 +526,28 @@ $("pdfInput").addEventListener("change", async (e) => {
 
     pageCount = pdfDoc.numPages;
     currentSlide = 1;
-    $("slideInfo").textContent = `1 / ${pageCount}`;
 
-    // Reset marks when new PDF loads (recommended)
+    // Reset slide marks when new PDF loads (recommended)
     marks.length = 0;
     clearAllRegions();
     renderMarksTable();
 
-    // pointer logs reset (optional)
     pointerEvents.length = 0;
     pointerPos = null;
 
     await renderSlide(1);
+    refreshControls();
 
     $("pdfInput").blur();
     e.target.value = "";
-    refreshControls();
   } catch (err) {
     showError(err);
   }
 });
 
-/** ---------------------------
- *  UI event listeners
- *  --------------------------*/
+/* ---------------------------
+ * UI listeners
+ * --------------------------*/
 $("playBtn").addEventListener("click", () => {
   if (!canInteract()) return;
   if (audioEl.paused) audioEl.play();
@@ -568,10 +561,19 @@ $("speedSel").addEventListener("change", (e) => {
 $("markBtn").addEventListener("click", doMark);
 $("undoBtn").addEventListener("click", doUndo);
 
-$("pointerToggle").addEventListener("change", (e) => {
-  setPointerEnabled(e.target.checked);
-});
+$("pointerToggle").addEventListener("change", (e) => setPointerEnabled(e.target.checked));
 
+// prevent Enter/Space on file inputs from reopening picker and bubbling
+for (const id of ["audioInput", "pdfInput"]) {
+  $(id).addEventListener("keydown", (e) => {
+    if (e.code === "Enter" || e.code === "Space") {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
+}
+
+// pointer capture on overlay
 const overlay = $("overlayCanvas");
 overlay.addEventListener("mousemove", (e) => {
   if (!pointerEnabled) return;
@@ -595,66 +597,58 @@ overlay.addEventListener("mouseup", (e) => {
   drawOverlayAtTime(audioEl.currentTime || 0);
 });
 
-// prevent Enter/Space on file inputs from bubbling to global handler / reopening picker
-for (const id of ["audioInput", "pdfInput"]) {
-  $(id).addEventListener("keydown", (e) => {
-    if (e.code === "Enter" || e.code === "Space") {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-  });
-}
-
-// Keyboard
+// Keyboard shortcuts
 window.addEventListener("keydown", (e) => {
   if (isTypingTarget(document.activeElement)) return;
+
+  if (e.key.toLowerCase() === "p") {
+    e.preventDefault();
+    togglePointer();
+    return;
+  }
 
   if (e.code === "Space") {
     e.preventDefault();
     if (!canInteract()) return;
     if (audioEl.paused) audioEl.play();
     else audioEl.pause();
+    return;
   }
 
   if (e.code === "Enter") {
     e.preventDefault();
-    doMark(); // works paused or playing
+    doMark();
+    return;
   }
 
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
     e.preventDefault();
     doUndo();
+    return;
   }
 });
 
-// time tick
+// Tick
 (function tick() {
   const t = audioEl.currentTime || 0;
   $("tNow").textContent = fmtTime(t);
   drawOverlayAtTime(t);
-
-  // show slide following playback time
-  if (canInteract()) {
-    const s = slideAtTime(buildSchedule(), t);
-    if (s !== currentSlide) renderSlide(s).catch(() => {});
-  }
-
   requestAnimationFrame(tick);
 })();
 
-/** ---------------------------
- *  FFmpeg loading (GitHub Pages safe)
- *  --------------------------*/
+/* ---------------------------
+ * FFmpeg loader (CDN; no wasm upload)
+ * --------------------------*/
 async function loadFFmpeg(ffmpeg) {
-  // Vite sets BASE_URL to "/" in dev and "/<repo>/" on GitHub Pages.
-  const base = import.meta.env.BASE_URL; // ends with "/"
-  const coreURL = await toBlobURL(`${base}vendor/ffmpeg/ffmpeg-core.js`, "text/javascript");
-  const wasmURL = await toBlobURL(`${base}vendor/ffmpeg/ffmpeg-core.wasm`, "application/wasm");
+  // pinned version; avoids having to upload ffmpeg-core.wasm to GitHub
+  const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
+  const coreURL = await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript");
+  const wasmURL = await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm");
   await ffmpeg.load({ coreURL, wasmURL });
 }
 
-async function blobToU8(blob) {
-  return new Uint8Array(await blob.arrayBuffer());
+function setExportStatus(html) {
+  $("exportStatus").innerHTML = html;
 }
 
 function getAudioInputName(file) {
@@ -664,18 +658,20 @@ function getAudioInputName(file) {
   return "audio_input";
 }
 
-/** ---------------------------
- *  Export scheduling + pointer burn-in (segment fast path)
- *  --------------------------*/
+async function blobToU8(blob) {
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+/* ---------------------------
+ * Export schedule
+ * slide 1 starts at 0, slide s starts at marks[slide=s].t
+ * --------------------------*/
 function buildSchedule() {
   const dur = audioEl.duration || 0;
-
-  // slide 1 starts at 0; slide s starts at marks entry for s
   const start = new Map();
   start.set(1, 0);
   for (const m of marks) start.set(m.slide, m.t);
 
-  // only schedule slides that have a start time; last scheduled slide holds to end
   const arr = [];
   for (let s = 1; s <= pageCount; s++) {
     if (start.has(s)) arr.push({ slide: s, t0: start.get(s) });
@@ -692,15 +688,16 @@ function buildSchedule() {
   return segs.filter((s) => s.len > 0.001);
 }
 
-function slideAtTime(segs, t) {
-  if (!segs?.length) return 1;
-  for (let i = segs.length - 1; i >= 0; i--) {
-    if (t >= segs[i].t0) return segs[i].slide;
-  }
-  return 1;
+function safeSegName(i) {
+  return `seg_${String(i).padStart(5, "0")}.mp4`;
+}
+function safeSlideName(slideNum) {
+  return `slide_${String(slideNum).padStart(4, "0")}.png`;
 }
 
-// Render each slide into exact output W×H and also return the content rect used to map pointer coords.
+/* ---------------------------
+ * Render slide into exact output W×H and return rect for pointer mapping
+ * --------------------------*/
 async function renderSlidePngAndRect(slideNum, W, H) {
   const page = await pdfDoc.getPage(slideNum);
 
@@ -708,20 +705,14 @@ async function renderSlidePngAndRect(slideNum, W, H) {
   const scale = Math.min(W / vp1.width, H / vp1.height);
   const vp = page.getViewport({ scale });
 
-  const canvas = document.createElement("canvas");
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext("2d", { alpha: false });
+  const out = document.createElement("canvas");
+  out.width = W;
+  out.height = H;
+  const octx = out.getContext("2d", { alpha: false });
 
-  // black background
-  ctx.fillStyle = "black";
-  ctx.fillRect(0, 0, W, H);
+  octx.fillStyle = "black";
+  octx.fillRect(0, 0, W, H);
 
-  // center the rendered page
-  const x0 = Math.floor((W - vp.width) / 2);
-  const y0 = Math.floor((H - vp.height) / 2);
-
-  // Render PDF into a temporary canvas at vp size, then draw into output canvas at x0,y0
   const tmp = document.createElement("canvas");
   tmp.width = Math.floor(vp.width);
   tmp.height = Math.floor(vp.height);
@@ -731,9 +722,11 @@ async function renderSlidePngAndRect(slideNum, W, H) {
 
   await page.render({ canvasContext: tctx, viewport: vp }).promise;
 
-  ctx.drawImage(tmp, x0, y0);
+  const x0 = Math.floor((W - tmp.width) / 2);
+  const y0 = Math.floor((H - tmp.height) / 2);
+  octx.drawImage(tmp, x0, y0);
 
-  const blob = await new Promise((res) => canvas.toBlob(res, "image/png"));
+  const blob = await new Promise((res) => out.toBlob(res, "image/png"));
   if (!blob) throw new Error("Failed to encode slide PNG.");
 
   return {
@@ -742,9 +735,10 @@ async function renderSlidePngAndRect(slideNum, W, H) {
   };
 }
 
-// For pointer burn-in: generate per-segment overlay PNG sequence (transparent) at OV_FPS
+/* ---------------------------
+ * Pointer overlay frames per segment (fast mode)
+ * --------------------------*/
 async function writePointerOverlayFrames(ffmpeg, seg, W, H, slideRect, ovFps) {
-  // Create an overlay canvas with alpha
   const c = document.createElement("canvas");
   c.width = W;
   c.height = H;
@@ -754,7 +748,6 @@ async function writePointerOverlayFrames(ffmpeg, seg, W, H, slideRect, ovFps) {
 
   for (let i = 0; i < frames; i++) {
     const t = seg.t0 + i / ovFps;
-
     ctx.clearRect(0, 0, W, H);
 
     if (pointerEnabled) {
@@ -763,19 +756,16 @@ async function writePointerOverlayFrames(ffmpeg, seg, W, H, slideRect, ovFps) {
         const cx = slideRect.x0 + p.x * slideRect.w;
         const cy = slideRect.y0 + p.y * slideRect.h;
 
-        // glow
         ctx.beginPath();
         ctx.arc(cx, cy, 18, 0, Math.PI * 2);
         ctx.fillStyle = "rgba(168,212,240,0.55)";
         ctx.fill();
 
-        // core dot
         ctx.beginPath();
         ctx.arc(cx, cy, 6, 0, Math.PI * 2);
         ctx.fillStyle = "rgba(47,128,237,0.92)";
         ctx.fill();
 
-        // ring
         ctx.beginPath();
         ctx.arc(cx, cy, 14, 0, Math.PI * 2);
         ctx.lineWidth = 2;
@@ -793,185 +783,126 @@ async function writePointerOverlayFrames(ffmpeg, seg, W, H, slideRect, ovFps) {
   return frames;
 }
 
-function setExportStatus(html) {
-  $("exportStatus").innerHTML = html;
-}
-
-function safeSegName(i) {
-  return `seg_${String(i).padStart(5, "0")}.mp4`;
-}
-
-function safeSlideName(slideNum) {
-  return `slide_${String(slideNum).padStart(4, "0")}.png`;
-}
-
-function canDeleteFiles(ffmpeg) {
-  return typeof ffmpeg.deleteFile === "function";
-}
-
 async function deleteOverlayFrames(ffmpeg, frames) {
-  if (!canDeleteFiles(ffmpeg)) return;
+  if (typeof ffmpeg.deleteFile !== "function") return;
   for (let i = 0; i < frames; i++) {
     const name = `ov_${String(i).padStart(6, "0")}.png`;
     try { await ffmpeg.deleteFile(name); } catch {}
   }
 }
 
+/* ---------------------------
+ * Export
+ * --------------------------*/
 $("exportBtn").addEventListener("click", async () => {
   try {
     if (!canInteract()) throw new Error("Load audio and PDF first.");
 
-    const segs = buildSchedule();
+    let segs = buildSchedule();
     if (!segs.length) {
-      // Allow exporting “single slide holds to end” with no marks
-      segs.push({ slide: 1, t0: 0, t1: audioEl.duration, len: audioEl.duration });
+      // Allow export even without marks: slide 1 holds full duration
+      segs = [{ slide: 1, t0: 0, t1: audioEl.duration, len: audioEl.duration }];
     }
 
     const [W, H] = $("resSel").value.split("x").map(Number);
     const outFps = 30;
-    const ovFps = 10; // pointer overlay sampling FPS (trade-off: speed vs smoothness)
+    const ovFps = Number($("ptrFpsSel").value);
 
-    setExportStatus(`Loading FFmpeg...`);
+    setExportStatus(`Loading FFmpeg (CDN core/wasm)...`);
     const ffmpeg = new FFmpeg();
     await loadFFmpeg(ffmpeg);
 
-    // Write audio
     setExportStatus(`Preparing audio...`);
     const audioName = getAudioInputName(audioFile);
-    const audioBytes = new Uint8Array(await audioFile.arrayBuffer());
-    await ffmpeg.writeFile(audioName, audioBytes);
+    await ffmpeg.writeFile(audioName, new Uint8Array(await audioFile.arrayBuffer()));
 
-    // Render needed slides once (into exact W×H) and keep their pointer mapping rect
-    const neededSlides = [...new Set(segs.map((s) => s.slide))];
-    setExportStatus(`Rasterizing ${neededSlides.length} slide(s)...`);
+    // Render slides (W×H) and store rects for pointer mapping
+    const neededSlides = [...new Set(segs.map(s => s.slide))];
     const slideRectByNum = new Map();
 
+    setExportStatus(`Rasterizing ${neededSlides.length} slide(s)...`);
     for (let i = 0; i < neededSlides.length; i++) {
-      const slideNum = neededSlides[i];
-      const { png, rect } = await renderSlidePngAndRect(slideNum, W, H);
-      await ffmpeg.writeFile(safeSlideName(slideNum), png);
-      slideRectByNum.set(slideNum, rect);
+      const s = neededSlides[i];
+      const { png, rect } = await renderSlidePngAndRect(s, W, H);
+      await ffmpeg.writeFile(safeSlideName(s), png);
+      slideRectByNum.set(s, rect);
       if (i % 2 === 0) setExportStatus(`Rasterizing slides... (${i + 1}/${neededSlides.length})`);
     }
 
-    // Encode each segment:
-    // - loop slide PNG
-    // - optionally overlay pointer frames (PNG sequence) for that segment
     setExportStatus(`Encoding segments... (0/${segs.length})`);
     for (let i = 0; i < segs.length; i++) {
       const seg = segs[i];
-      const outSeg = safeSegName(i);
       const t = seg.len.toFixed(3);
-
       const slidePng = safeSlideName(seg.slide);
+      const outSeg = safeSegName(i);
+
       const rect = slideRectByNum.get(seg.slide);
 
-      // If pointer is enabled, we generate overlay frames for this segment then overlay them.
       if (pointerEnabled && rect) {
-        // clean up old overlay frames from previous segment
-        // (best effort: if deleteFile exists, remove old; else overwrite)
-        // We'll generate frames and then (optionally) delete them after encoding.
-        setExportStatus(`Encoding segment ${i + 1}/${segs.length} (pointer overlay frames)...`);
+        setExportStatus(`Segment ${i + 1}/${segs.length}: rendering pointer overlay @ ${ovFps} fps...`);
         const frames = await writePointerOverlayFrames(ffmpeg, seg, W, H, rect, ovFps);
 
-        // Build segment with overlay:
-        // 0: loop slide image
-        // 1: overlay PNG sequence at ovFps
         await ffmpeg.exec([
           "-y",
-          "-loop",
-          "1",
-          "-i",
-          slidePng,
-          "-framerate",
-          String(ovFps),
-          "-i",
-          "ov_%06d.png",
-          "-t",
-          t,
-          "-filter_complex",
-          "[0:v][1:v]overlay=0:0:format=auto",
-          "-r",
-          String(outFps),
-          "-c:v",
-          "libx264",
-          "-pix_fmt",
-          "yuv420p",
-          "-preset",
-          "veryfast",
-          "-crf",
-          "20",
+          "-loop", "1", "-i", slidePng,
+          "-framerate", String(ovFps), "-i", "ov_%06d.png",
+          "-t", t,
+          "-filter_complex", "[0:v][1:v]overlay=0:0:format=auto",
+          "-r", String(outFps),
+          "-c:v", "libx264",
+          "-pix_fmt", "yuv420p",
+          "-preset", "veryfast",
+          "-crf", "20",
           outSeg,
         ]);
 
         await deleteOverlayFrames(ffmpeg, frames);
       } else {
-        // No pointer: pure fast loop segment
         await ffmpeg.exec([
           "-y",
-          "-loop",
-          "1",
-          "-i",
-          slidePng,
-          "-t",
-          t,
-          "-r",
-          String(outFps),
-          "-c:v",
-          "libx264",
-          "-pix_fmt",
-          "yuv420p",
-          "-preset",
-          "veryfast",
-          "-crf",
-          "20",
+          "-loop", "1", "-i", slidePng,
+          "-t", t,
+          "-r", String(outFps),
+          "-c:v", "libx264",
+          "-pix_fmt", "yuv420p",
+          "-preset", "veryfast",
+          "-crf", "20",
           outSeg,
         ]);
       }
 
-      if (i % 5 === 0) setExportStatus(`Encoding segments... (${i + 1}/${segs.length})`);
+      if (i % 3 === 0) setExportStatus(`Encoding segments... (${i + 1}/${segs.length})`);
     }
 
-    // Concat segments
     setExportStatus(`Concatenating segments...`);
     const concatTxt = segs.map((_, i) => `file ${safeSegName(i)}`).join("\n") + "\n";
     await ffmpeg.writeFile("concat.txt", new TextEncoder().encode(concatTxt));
 
     await ffmpeg.exec([
       "-y",
-      "-f",
-      "concat",
-      "-safe",
-      "0",
-      "-i",
-      "concat.txt",
-      "-c",
-      "copy",
+      "-f", "concat",
+      "-safe", "0",
+      "-i", "concat.txt",
+      "-c", "copy",
       "video.mp4",
     ]);
 
-    // Mux audio
     setExportStatus(`Muxing audio...`);
     await ffmpeg.exec([
       "-y",
-      "-i",
-      "video.mp4",
-      "-i",
-      audioName,
-      "-c:v",
-      "copy",
-      "-c:a",
-      "aac",
-      "-b:a",
-      "192k",
+      "-i", "video.mp4",
+      "-i", audioName,
+      "-c:v", "copy",
+      "-c:a", "aac",
+      "-b:a", "192k",
       "-shortest",
       "out.mp4",
     ]);
 
     setExportStatus(`<span class="ok">Finalizing...</span>`);
     const out = await ffmpeg.readFile("out.mp4");
-    const outBlob = new Blob([out.buffer], { type: "video/mp4" });
-    const url = URL.createObjectURL(outBlob);
+    const blob = new Blob([out.buffer], { type: "video/mp4" });
+    const url = URL.createObjectURL(blob);
 
     const a = document.createElement("a");
     a.href = url;
@@ -985,9 +916,9 @@ $("exportBtn").addEventListener("click", async () => {
   }
 });
 
-/** ---------------------------
- *  Initial sync
- *  --------------------------*/
-refreshControls();
+/* ---------------------------
+ * Init
+ * --------------------------*/
 renderMarksTable();
+refreshControls();
 setPointerEnabled(false);
