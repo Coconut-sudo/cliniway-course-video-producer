@@ -127,6 +127,7 @@ function mountUI() {
         <div class="row" style="margin-top:10px;">
           <button id="exportBtn" class="btn primary" disabled>Export MP4</button>
           <select id="ptrFpsSel" class="select" title="Pointer overlay FPS">
+            <option value="5">Pointer 5 fps (fast)</option>
             <option value="10" selected>Pointer 10 fps</option>
             <option value="15">Pointer 15 fps</option>
             <option value="20">Pointer 20 fps</option>
@@ -817,6 +818,7 @@ $("exportBtn").addEventListener("click", async () => {
     if (!canInteract()) throw new Error("Load audio and PDF first.");
 
     let segs = buildSchedule();
+      segs = splitLongSegments(segs, 120); // 120s per chunk; change to 60 if you want faster/safer
     if (!segs.length) {
       // Allow export even without marks: slide 1 holds full duration
       segs = [{ slide: 1, t0: 0, t1: audioEl.duration, len: audioEl.duration }];
@@ -940,4 +942,5 @@ $("exportBtn").addEventListener("click", async () => {
 renderMarksTable();
 refreshControls();
 setPointerEnabled(false);
+
 
