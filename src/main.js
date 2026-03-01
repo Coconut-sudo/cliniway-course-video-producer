@@ -688,6 +688,24 @@ function buildSchedule() {
   return segs.filter((s) => s.len > 0.001);
 }
 
+function splitLongSegments(segs, maxLenSec = 120) {
+  const out = [];
+  for (const s of segs) {
+    let t0 = s.t0;
+    while (t0 < s.t1 - 0.001) {
+      const t1 = Math.min(s.t1, t0 + maxLenSec);
+      out.push({
+        slide: s.slide,
+        t0,
+        t1,
+        len: t1 - t0,
+      });
+      t0 = t1;
+    }
+  }
+  return out;
+}
+
 function safeSegName(i) {
   return `seg_${String(i).padStart(5, "0")}.mp4`;
 }
@@ -922,3 +940,4 @@ $("exportBtn").addEventListener("click", async () => {
 renderMarksTable();
 refreshControls();
 setPointerEnabled(false);
+
