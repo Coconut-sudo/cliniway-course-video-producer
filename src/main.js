@@ -126,6 +126,7 @@ function mountUI() {
 
         <div class="row" style="margin-top:10px;">
           <button id="exportBtn" class="btn primary" disabled>Export MP4</button>
+          <button id="testExportBtn" class="btn" style="margin-top:10px;">Minimal export test (3s)</button>
           <select id="ptrFpsSel" class="select" title="Pointer overlay FPS">
             <option value="5">Pointer 5 fps (fast)</option>
             <option value="10" selected>Pointer 10 fps</option>
@@ -936,11 +937,80 @@ $("exportBtn").addEventListener("click", async () => {
   }
 });
 
+$("testExportBtn").addEventListener("click", async () => {
+  try {
+    $("runtimeError").innerHTML = "";
+    setExportStatus("Minimal test: loading FFmpeg...");
+
+    const ffmpeg = new FFmpeg();
+    await loadFFmpeg(ffmpeg);
+
+    // 3 seconds test audio: if user loaded audio, take first 3s; otherwise generate silent tone
+    if (audioFile) {
+      const audioName = getAudioInputName(audioFile);
+      await ffmpeg.writeFile(audioName, new Uint8Array(await audioFile.arrayBuffer()));
+
+      setExportStatus("Minimal test: encoding 3s video + first 3s audio...");
+      await ffmpeg.exec([
+        "-y",
+        "-f", "lavfi",
+        "-i", "color=c=black:s=1280x720:r=30",
+        "-i", audioName,
+        "-t", "3",
+        "-map", "0:v:0",
+        "-map", "1:a:0",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-preset", "ultrafast",
+        "-crf", "28",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-shortest",
+        "test_out.mp4",
+      ]);
+    } else {
+      setExportStatus("Minimal test: encoding 3s video + synthetic audio...");
+      await ffmpeg.exec([
+        "-y",
+        "-f", "lavfi",
+        "-i", "color=c=black:s=1280x720:r=30",
+        "-f", "lavfi",
+        "-i", "sine=frequency=440:sample_rate=48000",
+        "-t", "3",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-preset", "ultrafast",
+        "-crf", "28",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-shortest",
+        "test_out.mp4",
+      ]);
+    }
+
+    setExportStatus("Minimal test: reading file...");
+    const out = await ffmpeg.readFile("test_out.mp4");
+    const blob = new Blob([out.buffer], { type: "video/mp4" });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "ffmpeg_minimal_test.mp4";
+    a.click();
+
+    setExportStatus(`<span class="ok">Minimal test succeeded ✅</span>`);
+  } catch (err) {
+    showError(err);
+    setExportStatus(`<span class="danger">Minimal test failed ❌</span>`);
+  }
+});
+
 /* ---------------------------
  * Init
  * --------------------------*/
 renderMarksTable();
 refreshControls();
 setPointerEnabled(false);
+
 
 
