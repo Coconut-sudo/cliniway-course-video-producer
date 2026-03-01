@@ -816,6 +816,8 @@ async function deleteOverlayFrames(ffmpeg, frames) {
  * --------------------------*/
 $("exportBtn").addEventListener("click", async () => {
   try {
+    const pointerWasEnabled = pointerEnabled;
+pointerEnabled = false;
     if (!canInteract()) throw new Error("Load audio and PDF first.");
 
     let segs = buildSchedule();
@@ -823,6 +825,7 @@ $("exportBtn").addEventListener("click", async () => {
     if (!segs.length) {
       // Allow export even without marks: slide 1 holds full duration
       segs = [{ slide: 1, t0: 0, t1: audioEl.duration, len: audioEl.duration }];
+      pointerEnabled = pointerWasEnabled;
     }
 
     const [W, H] = $("resSel").value.split("x").map(Number);
@@ -859,38 +862,17 @@ $("exportBtn").addEventListener("click", async () => {
 
       const rect = slideRectByNum.get(seg.slide);
 
-      if (pointerEnabled && rect) {
-        setExportStatus(`Segment ${i + 1}/${segs.length}: rendering pointer overlay @ ${ovFps} fps...`);
-        const frames = await writePointerOverlayFrames(ffmpeg, seg, W, H, rect, ovFps);
-
-        await ffmpeg.exec([
-          "-y",
-          "-loop", "1", "-i", slidePng,
-          "-framerate", String(ovFps), "-i", "ov_%06d.png",
-          "-t", t,
-          "-filter_complex", "[0:v][1:v]overlay=0:0:format=auto",
-          "-r", String(outFps),
-          "-c:v", "libx264",
-          "-pix_fmt", "yuv420p",
-          "-preset", "veryfast",
-          "-crf", "20",
-          outSeg,
-        ]);
-
-        await deleteOverlayFrames(ffmpeg, frames);
-      } else {
-        await ffmpeg.exec([
-          "-y",
-          "-loop", "1", "-i", slidePng,
-          "-t", t,
-          "-r", String(outFps),
-          "-c:v", "libx264",
-          "-pix_fmt", "yuv420p",
-          "-preset", "veryfast",
-          "-crf", "20",
-          outSeg,
-        ]);
-      }
+      await ffmpeg.exec([
+  "-y",
+  "-loop", "1", "-i", slidePng,
+  "-t", t,
+  "-r", String(outFps),
+  "-c:v", "libx264",
+  "-pix_fmt", "yuv420p",
+  "-preset", "ultrafast",
+  "-crf", "26",
+  outSeg,
+]);
 
       if (i % 3 === 0) setExportStatus(`Encoding segments... (${i + 1}/${segs.length})`);
     }
@@ -1011,6 +993,7 @@ $("testExportBtn").addEventListener("click", async () => {
 renderMarksTable();
 refreshControls();
 setPointerEnabled(false);
+
 
 
 
